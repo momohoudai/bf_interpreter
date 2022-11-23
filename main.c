@@ -14,8 +14,9 @@
 // to avoid the use of some form of realloc.
 //
 // TODO: 
-// - Dynamic data size?
+// - Better memory allocation strategy (can we reduce malloc calls?)
 // - Error checking when out of data bounds.
+// - Better error messages
 //
 #include <stdio.h>
 #include <stdlib.h>
@@ -106,8 +107,6 @@ bf_parser_free(BF_Parser* p) {
   p->node_count = 0;
   p->nodes = 0;
 }
-
-
 
 
 static void 
@@ -437,7 +436,8 @@ bf_execute(const char* src, int src_size) {
 
 
 
-
+/////////////////////////////////////////////////////////////////
+// Test code
 static char* 
 read_file_as_string(const char* filename, int* out_size) 
 {
