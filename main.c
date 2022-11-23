@@ -22,12 +22,6 @@
 #include <string.h>
 #include <assert.h>
 
-#define BF_PROFILE 0
-
-
-#if BF_PROFILE
-# include <time.h>
-#endif 
 
 static const char* bf_error = 0;
 
@@ -54,11 +48,6 @@ typedef struct BF_Lexer {
 } BF_Lexer; 
 
 
-typedef struct BF_Tokens {
-  int cap;
-  int count;
-  BF_Token* e;
-} BF_Tokens; 
 
 // The parser's job is to consume the tokens into a set of 'nodes' which
 // are instructions for the intepreter to execute. These nodes form the
@@ -80,13 +69,6 @@ typedef struct BF_AST {
   struct BF_Node* last;
 } BF_AST;
 
-
-
-typedef struct BF_AST_Stack {
-  int cap;
-  int count;
-  BF_AST* e;
-} BF_AST_Stack;
 
 typedef struct BF_Node_Loop {
   BF_AST ast;
@@ -111,41 +93,12 @@ typedef struct BF_Parser {
 
 
 typedef struct BF_State {
-  char data[2000];
+  char data[1<<10];
   int at;
 } BF_State;
 
 ///////////////////////////////////////////////////////////////////////
 //
-static void
-bf_ast_stack_free(BF_AST_Stack* p) {
-  free(p->e);
-  p->count = p->cap = 0;
-  p->e = 0;
-}
-
-static BF_AST*
-bf_ast_stack_push(BF_AST_Stack* p) {
-  BF_AST* ret = p->e + p->count++;
-  ret->first = ret->last = 0;
-
-  return ret ;
-}
-
-static void
-bf_ast_stack_pop(BF_AST_Stack* p) {
-  if (p->count > 0){
-    --p->count;
-  }
-}
-
-static BF_AST*
-bf_ast_stack_last(BF_AST_Stack* p) {
-  if (p->count > 0) {
-    return p->e + p->count - 1;
-  }
-  return 0;
-}
 
 static void
 bf_parser_free(BF_Parser* p) {
@@ -155,11 +108,6 @@ bf_parser_free(BF_Parser* p) {
 }
 
 
-static BF_Node*
-bf_parser_new_node(BF_Parser* p) {
-  BF_Node* ret = p->nodes + p->node_count++;
-  return ret;
-}
 
 
 static void 
@@ -234,6 +182,7 @@ bf_interpret(BF_Parser* parser) {
     bf_interpret_node(&state, itr);
   }
 }
+
 static int
 bf_parser_parse(BF_Parser* parser, BF_Token* tokens, int token_count)  
 {
@@ -254,81 +203,82 @@ bf_parser_parse(BF_Parser* parser, BF_Token* tokens, int token_count)
   printf("total asts: %d\n", total_asts);
 #endif
 
-  parser->nodes = (BF_Node*)malloc(sizeof(BF_Node)*total_nodes);
-  parser->node_count = 0;
-  
+  int node_count = 0;
+  int ast_count = 0;
 
-  BF_AST_Stack stack = {0};
-  stack.e = (BF_AST*)malloc(sizeof(BF_AST)*total_asts);
-  stack.count = 0;
+  BF_Node* nodes = (BF_Node*)malloc(sizeof(BF_Node)*total_nodes); 
+  BF_AST* asts = (BF_AST*)malloc(sizeof(BF_AST)*total_asts);
+  if (!nodes || ! asts) goto ded;
 
-  BF_AST* cur_ast = bf_ast_stack_push(&stack);
 
+  BF_AST* cur_ast = asts + ast_count++;
+  cur_ast->first = cur_ast->last = 0;
+
+#define bf_push_node(t)\
+  nodes[node_count].type = t;\
+  bf_ast_push_node(cur_ast, nodes + node_count++); 
 
   for (int token_index = 0; 
        token_index < token_count; 
        ++token_index) 
   {
+
     BF_Token* token = tokens + token_index;
     switch(token->type) {
       case BF_TOKEN_TYPE_ADD: {
-        BF_Node* node = bf_parser_new_node(parser);
-        node->type = BF_NODE_TYPE_ADD;
-        bf_ast_push_node(cur_ast, node); 
+        bf_push_node(BF_NODE_TYPE_ADD);
       } break;
       case BF_TOKEN_TYPE_SUB: {
-        BF_Node* node = bf_parser_new_node(parser);
-        node->type = BF_NODE_TYPE_SUB;
-        bf_ast_push_node(cur_ast, node); 
+        bf_push_node(BF_NODE_TYPE_SUB);
       } break;
       case BF_TOKEN_TYPE_SHIFT_LEFT: {
-        BF_Node* node = bf_parser_new_node(parser);
-        node->type = BF_NODE_TYPE_SHIFT_LEFT;
-        bf_ast_push_node(cur_ast, node); 
+        bf_push_node(BF_NODE_TYPE_SHIFT_LEFT);
       } break;
       case BF_TOKEN_TYPE_SHIFT_RIGHT: {
-        BF_Node* node = bf_parser_new_node(parser);
-        node->type = BF_NODE_TYPE_SHIFT_RIGHT;
-        bf_ast_push_node(cur_ast, node); 
+        bf_push_node(BF_NODE_TYPE_SHIFT_RIGHT);
       } break;
       case BF_TOKEN_TYPE_READ: {
-        BF_Node* node = bf_parser_new_node(parser);
-        node->type = BF_NODE_TYPE_READ;
-        bf_ast_push_node(cur_ast, node); 
+        bf_push_node(BF_NODE_TYPE_READ);
       } break;
       case BF_TOKEN_TYPE_WRITE: {
-        BF_Node* node = bf_parser_new_node(parser);
-        node->type = BF_NODE_TYPE_WRITE;
-        bf_ast_push_node(cur_ast, node); 
+        bf_push_node(BF_NODE_TYPE_WRITE);
       } break;
       case BF_TOKEN_TYPE_BEGIN_LOOP: {
-        BF_Node* node = bf_parser_new_node(parser);
-        node->type = BF_NODE_TYPE_LOOP;
-        bf_ast_push_node(cur_ast, node);
-        cur_ast = bf_ast_stack_push(&stack); 
+        bf_push_node(BF_NODE_TYPE_LOOP);
+
+        cur_ast = asts + ast_count++;
+        cur_ast->first = cur_ast->last = 0;
+
       } break;
       case BF_TOKEN_TYPE_END_LOOP: {
         BF_AST* loop_ast = cur_ast;
-
-        bf_ast_stack_pop(&stack);
-        cur_ast = bf_ast_stack_last(&stack);
-
-        if (cur_ast == 0) {
-          // TODO error
-          bf_ast_stack_free(&stack);
-          bf_parser_free(parser);
-          return 0;
+        if (ast_count <= 1) {
+          bf_error = "loop ended with ']' but there is no loop!";
+          goto ded;
         }
+        else {
+          --ast_count;
+          cur_ast = asts + ast_count - 1;
+        }
+        
         // Get the last node of the AST which should be a loop node
-        assert(cur_ast->last->type == BF_NODE_TYPE_LOOP);
+        //assert(cur_ast->last->type == BF_NODE_TYPE_LOOP);
         cur_ast->last->loop.ast = (*loop_ast); 
       } break;
     }
   }
 
+  parser->nodes = nodes;
+  parser->node_count = node_count;
   parser->root_ast = (*cur_ast);
-  bf_ast_stack_free(&stack);
+
+  free(asts);
   return 1;
+#undef bf_push_node
+ded: 
+  free(nodes);
+  free(asts);
+  return 0;
 }
 
 static unsigned
@@ -454,7 +404,9 @@ bf_lexer_lex(BF_Lexer* lexer, const char* src, int src_size)
 
   lexer->tokens = tokens;
   lexer->token_count = token_count;
+
   //bf_print_all_tokens(lexer);
+  
   return 1;
 }
 
@@ -467,7 +419,6 @@ bf_execute(const char* src, int src_size) {
 
   if (bf_lexer_lex(&lexer, src, src_size)) 
   {
-
     if (bf_parser_parse(&parser, lexer.tokens, lexer.token_count))
     {
       bf_interpret(&parser);
